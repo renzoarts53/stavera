@@ -1,0 +1,7 @@
+{
+  "name": "stavera",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stavera: send, receive, swap and bridge stablecoins on Arc Testnet with MetaMask",
+  "scripts": { "dev": "npx serve .", "deploy": "npx vercel --prod" }
+}
