@@ -176,6 +176,21 @@ h1{font-size:clamp(46px,6.4vw,118px);margin-bottom:22px}
 .fi{flex:none;width:48px;height:48px;border-radius:50%;background:var(--soft);display:grid;place-items:center}
 .fi svg{width:22px;height:22px;stroke:var(--acc);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 @media(max-width:860px){.feat li{padding:0 14px}.feat li:first-child{padding-left:0}.fi{width:40px;height:40px}}
+#txc{margin-top:14px;border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:16px 18px;font-size:14px;color:var(--ink)}
+#txc[hidden]{display:none}
+#txc .th{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
+#txc .tt{font-weight:700;font-size:15px}
+#txc .bd{font:700 12px Inter,sans-serif;padding:4px 10px;border-radius:999px;background:var(--soft);color:var(--acc);white-space:nowrap}
+#txc .bd.ok{background:#e6f6ee;color:#157347}#txc .bd.fail{background:#fdecec;color:#b42318}#txc .bd.pend{background:#fff4e0;color:#9a5b00}
+#txc dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0}
+#txc dt{color:var(--mute)}#txc dd{margin:0;word-break:break-all;font-weight:600}
+#txc a{color:var(--acc);font-weight:600;text-decoration:none}#txc a:hover{text-decoration:underline}
+#txc ol{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
+#txc li{display:flex;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:10px}
+#txc .row2{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+#txc button{border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:8px 12px;font:600 13px Inter,sans-serif;cursor:pointer;color:var(--ink)}
+#bFlipRow{display:flex;justify-content:center;margin:8px 0}
+#bFlipRow button{border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:6px 14px;font:600 13px Inter,sans-serif;cursor:pointer;color:var(--acc)}
 </style>
 </head>
 <body>
@@ -235,7 +250,7 @@ h1{font-size:clamp(46px,6.4vw,118px);margin-bottom:22px}
 <div class="pair"><input id="bAmt" inputmode="decimal" placeholder="0.00" autocomplete="off"><select id="bTok" aria-label="Coin to bridge"><option>USDC</option><option disabled>EURC</option><option disabled>cirBTC</option></select></div>
 <div class="row"><button class="btn lg" id="bridge">Bridge</button></div>
 <p class="fine tb"></p>
-<p class="fine">Bridging uses Circle CCTP, which moves USDC only. EURC and cirBTC cannot be bridged this way. You need gas on both networks (USDC on Arc, ETH on Sepolia networks).</p>
+<p class="fine" id="bNote">Bridging uses Circle CCTP, which moves USDC only. EURC and cirBTC cannot be bridged this way. You need gas on both networks (USDC on Arc, ETH on Sepolia networks).</p>
 </div>
 <div id="msg" role="status"></div>
 </div></div>
@@ -324,7 +339,9 @@ async function dash(){if(!acct)return;renderTx();
   const k=Math.min(20,n),g=h=>eth().request({method:'eth_getBlockByNumber',params:['0x'+h.toString(16),false]});
   const[x,y]=await Promise.all([g(n),g(n-k)]);const dt=(parseInt(x.timestamp,16)-parseInt(y.timestamp,16))/k;
   $('dBt').textContent=dt>0?dt.toFixed(2)+'s':'< 1s'}catch(e){$('dBlk').textContent='Unavailable';$('dBt').textContent='Unavailable'}}
-async function refresh(){if(!acct)return;dash();refreshTokens();try{$('dBal').textContent=$('bal').textContent=fmt(BigInt(await eth().request({method:'eth_getBalance',params:[acct,'latest']})))+' USDC'}catch(e){say('Could not read your balance: '+(e.message||e),'err')}}
+async function onArc(){return String(await eth().request({method:'eth_chainId'})).toLowerCase()===N.chainId.toLowerCase()}
+function syncNet(){onArc().then(ok=>{if(ok)show();else{$('net').textContent='Wrong network';$('netw').classList.remove('on')}refresh()}).catch(()=>{})}
+async function refresh(){if(!acct)return;try{if(!(await onArc())){$('dBal').textContent=$('bal').textContent='Switch to Arc Testnet';$('dBt').textContent=$('dBlk').textContent='—';return}}catch(e){return}dash();refreshTokens();try{$('dBal').textContent=$('bal').textContent=fmt(BigInt(await eth().request({method:'eth_getBalance',params:[acct,'latest']})))+' USDC'}catch(e){say('Could not read your balance: '+(e.message||e),'err')}}
 async function switchToArc(){
  try{await eth().request({method:'wallet_switchEthereumChain',params:[{chainId:N.chainId}]})}
  catch(e){
@@ -352,19 +369,85 @@ async function connect(){
   ['connectTop','connectHero','connectHow'].forEach(i=>{$(i).textContent='Connected';$(i).disabled=true});toast('Wallet connected to Arc Testnet.','ok');refresh();
  }catch(e){acct=null;toast(e.code===4001?'Request rejected in MetaMask.':'Connection failed: '+(e.message||e),'err');say(e.code===4001?'Request rejected in MetaMask.':'Connection failed: '+(e.message||e),'err')}
 }
+
+/* ===== Transaction status, chain helpers and diagnostics ===== */
+const CH={
+ Arc_Testnet:{id:5042002,n:'Arc Testnet',ex:'https://testnet.arcscan.app/'},
+ Ethereum_Sepolia:{id:11155111,n:'Ethereum Sepolia',ex:'https://sepolia.etherscan.io/',gas:'ETH'},
+ Base_Sepolia:{id:84532,n:'Base Sepolia',ex:'https://sepolia.basescan.org/',rpc:'https://sepolia.base.org',gas:'ETH',cur:{name:'Ether',symbol:'ETH',decimals:18}},
+ Arbitrum_Sepolia:{id:421614,n:'Arbitrum Sepolia',ex:'https://sepolia.arbiscan.io/',rpc:'https://sepolia-rollup.arbitrum.io/rpc',gas:'ETH',cur:{name:'Ether',symbol:'ETH',decimals:18}}
+};
+const chHex=k=>'0x'+CH[k].id.toString(16);
+async function ensureChain(k){
+ const cur=await eth().request({method:'eth_chainId'});if(String(cur).toLowerCase()===chHex(k))return;
+ if(k==='Arc_Testnet'){await switchToArc();return}
+ try{await eth().request({method:'wallet_switchEthereumChain',params:[{chainId:chHex(k)}]})}
+ catch(e){
+  if((e.code===4902||e.code===-32603)&&CH[k].rpc){
+   await eth().request({method:'wallet_addEthereumChain',params:[{chainId:chHex(k),chainName:CH[k].n,rpcUrls:[CH[k].rpc],nativeCurrency:CH[k].cur,blockExplorerUrls:[CH[k].ex]}]});
+  }else throw e}
+}
+const DIAG=[];window.stvDiag=DIAG;
+function errInfo(e){return{name:e&&e.name,message:e&&e.message,shortMessage:e&&e.shortMessage,code:e&&e.code,cause:e&&e.cause&&(e.cause.message||String(e.cause))}}
+function dlog(kind,data,raw){let d;try{let j=JSON.stringify(data,(k,v)=>typeof v==='bigint'?v.toString():v);if(!raw)j=j.replace(/\b0x[0-9a-fA-F]{40}\b/g,m=>m.slice(0,6)+'…'+m.slice(-4));d=JSON.parse(j)}catch(e){d=String(data)}
+ DIAG.push({t:new Date().toISOString(),kind,data:d});if(DIAG.length>80)DIAG.shift();try{console.log('[stavera]',kind,d)}catch(e){}}
+function diagReport(){return JSON.stringify({generated:new Date().toISOString(),site:location.host,wallet:acct?acct.slice(0,6)+'…'+acct.slice(-4):null,entries:DIAG},null,2)}
+async function copyDiag(btn){const t=diagReport();try{await navigator.clipboard.writeText(t);btn.textContent='Copied. Paste it into the chat.'}catch(e){window.prompt('Copy this report:',t)}}
+function mkLink(u,t){const a=document.createElement('a');a.href=u;a.target='_blank';a.rel='noopener';a.textContent=t;return a}
+const safeUrl=u=>typeof u==='string'&&/^https:\/\//.test(u)?u:null;
+const sh=a=>a&&String(a).length>12?String(a).slice(0,6)+'…'+String(a).slice(-4):a;
+const exTx=(k,h)=>h?CH[k].ex+'tx/'+h:null;
+function txCard(o){
+ let c=$('txc');if(!c){c=document.createElement('div');c.id='txc';c.setAttribute('role','status');$('msg').after(c)}
+ c.hidden=false;c.textContent='';
+ const h=document.createElement('div');h.className='th';
+ const t=document.createElement('span');t.className='tt';t.textContent=o.title;
+ const b=document.createElement('span');b.className='bd '+(o.cls||'');b.textContent=o.status;h.append(t,b);c.appendChild(h);
+ if(o.rows){const dl=document.createElement('dl');
+  o.rows.filter(r=>r[1]!=null&&r[1]!=='').forEach(([k,v])=>{const dt=document.createElement('dt');dt.textContent=k;const dd=document.createElement('dd');if(v instanceof Node)dd.appendChild(v);else dd.textContent=v;dl.append(dt,dd)});
+  c.appendChild(dl)}
+ if(o.steps&&o.steps.length){const ol=document.createElement('ol');
+  o.steps.forEach(s=>{const li=document.createElement('li');const l=document.createElement('span');l.textContent=s.label;const r=document.createElement('span');
+   if(s.url)r.appendChild(mkLink(s.url,s.state));else r.textContent=s.state;li.append(l,r);ol.appendChild(li)});c.appendChild(ol)}
+ if(o.note){const p=document.createElement('p');p.className='fine';p.textContent=o.note;c.appendChild(p)}
+ const r2=document.createElement('div');r2.className='row2';
+ (o.actions||[]).forEach(([lbl,fn])=>{const x=document.createElement('button');x.type='button';x.textContent=lbl;x.onclick=()=>fn(x);r2.appendChild(x)});
+ const dg=document.createElement('button');dg.type='button';dg.textContent='Copy diagnostic report';dg.onclick=()=>copyDiag(dg);r2.appendChild(dg);c.appendChild(r2);
+}
+async function waitReceipt(h,ms){const t0=Date.now();ms=ms||60000;
+ while(Date.now()-t0<ms){try{const r=await eth().request({method:'eth_getTransactionReceipt',params:[h]});if(r)return r}catch(e){}await new Promise(r=>setTimeout(r,1000))}
+ return null}
+const rcState=r=>!r?'unk':(r.status==='0x1'?'ok':'fail');
+const rcBlock=r=>r&&r.blockNumber?parseInt(r.blockNumber,16).toLocaleString():null;
+
 async function send(){
+ let started=false;
  try{
   if(!acct)throw new Error('Connect your wallet first');
   const to=$('to').value.trim();
   if(!ADDR.test(to))throw new Error('Enter a valid 0x address');
   if(/^0x0{40}$/.test(to))throw new Error('Sending to the zero address reverts on Arc');
   const v=parseAmt($('amt').value.trim());if(v<=0n)throw new Error('Amount must be greater than zero');
-  $('send').disabled=true;say('Confirm the transfer in MetaMask…');
-  const h=await eth().request({method:'eth_sendTransaction',params:[{from:acct,to,value:'0x'+v.toString(16)}]});logTx(h,to,$('amt').value.trim());
-  const m=$('msg');m.className='ok';m.textContent='Transfer submitted. ';
-  const l=document.createElement('a');l.href=N.blockExplorerUrls[0]+'tx/'+h;l.target='_blank';l.rel='noopener';l.textContent='View transaction';m.appendChild(l);setTimeout(refresh,1500);
- }catch(e){say(e.code===4001?'Transfer rejected in MetaMask.':(e.message||String(e)),'err')}
- finally{$('send').disabled=false}
+  const amtTxt=$('amt').value.trim();
+  $('send').disabled=true;window.__busy=true;say('');
+  const rows=(h,extra)=>[['Token','USDC'],['Amount',amtTxt+' USDC'],['From',acct],['To',to],['Network','Arc Testnet (chain 5042002)'],['Transaction',h?sh(h):null],['Explorer',h?mkLink(exTx('Arc_Testnet',h),'View on Arcscan'):null]].concat(extra||[]);
+  await ensureChain('Arc_Testnet');
+  started=true;txCard({title:'Send USDC',status:'Waiting for MetaMask',cls:'pend',rows:rows(),note:'Confirm the transfer in your wallet.'});
+  const h=await eth().request({method:'eth_sendTransaction',params:[{from:acct,to,value:'0x'+v.toString(16)}]});
+  dlog('send:submitted',{hash:h,to,amount:amtTxt});
+  txCard({title:'Send USDC',status:'Pending',cls:'pend',rows:rows(h),note:'Submitted. Waiting for the network to confirm…'});
+  const rc=await waitReceipt(h);dlog('send:receipt',rc);
+  const st=rcState(rc);
+  if(st==='ok'){logTx(h,to,amtTxt);txCard({title:'Send USDC',status:'Confirmed',cls:'ok',rows:rows(h,[['Block',rcBlock(rc)]]),note:'The transfer is confirmed on Arc Testnet.'})}
+  else if(st==='fail')txCard({title:'Send USDC',status:'Failed',cls:'fail',rows:rows(h,[['Block',rcBlock(rc)]]),note:'The transaction was included but reverted. No USDC was transferred.'});
+  else txCard({title:'Send USDC',status:'Not confirmed yet',cls:'pend',rows:rows(h),note:'No receipt after 60 seconds. Open the explorer link to check before sending again.'});
+  setTimeout(refresh,1000);
+ }catch(e){
+  dlog('send:error',errInfo(e));
+  const msg=e.code===4001?'You rejected the request in MetaMask. Nothing was sent.':(e.message||String(e));
+  if(started)txCard({title:'Send USDC',status:e.code===4001?'Rejected':'Failed',cls:'fail',note:msg});else say(e.code===4001?'Transfer rejected in MetaMask.':msg,'err');
+ }
+ finally{$('send').disabled=false;window.__busy=false;syncNet()}
 }
 let link='';
 $('mk').onclick=()=>{
@@ -382,7 +465,7 @@ document.querySelectorAll('.tabs [data-t]').forEach(b=>b.onclick=()=>{
 
 if(eth()){
  eth().on&&eth().on('chainChanged',id=>{
-  if(!acct)return;
+  if(!acct||window.__busy)return;
   if(id.toLowerCase()!==N.chainId.toLowerCase()){$('net').textContent='Wrong network';$('netw').classList.remove('on');say('Please switch back to Arc Testnet.','err')}
   else{show();say('Connected to Arc Testnet.','ok');refresh()}
  });
@@ -391,7 +474,7 @@ if(eth()){
 document.querySelectorAll('.faq details').forEach(d=>d.addEventListener('toggle',()=>{if(d.open)document.querySelectorAll('.faq details[open]').forEach(o=>{if(o!==d)o.open=false})}));
 $('connectTop').onclick=connect;$('connectHero').onclick=connect;$('connectHow').onclick=connect;$('send').onclick=send;
 $('copy').onclick=async()=>{if(!acct)return say('Connect your wallet first','err');try{await navigator.clipboard.writeText(acct);say('Address copied.','ok')}catch(e){say('Copy failed. Select the address and copy it manually.','err')}};
-if(eth()&&eth().on){eth().on('accountsChanged',a=>{if(a[0]){acct=a[0];show();refresh()}else location.reload()});eth().on('chainChanged',refresh)}
+if(eth()&&eth().on){eth().on('accountsChanged',a=>{if(a[0]){acct=a[0];show();refresh()}else location.reload()});eth().on('chainChanged',()=>{if(!window.__busy)refresh()})}
 // Open a payment link: prefill the Send tab
 try{const q=new URLSearchParams(location.search),to=q.get('to'),amt=q.get('amt');
  if(ADDR.test(to||'')&&/^\d+(\.\d+)?$/.test(amt||'')){$('to').value=to;$('amt').value=amt;say('Payment request: '+amt+' USDC to '+to.slice(0,6)+'…'+to.slice(-4)+'. Connect your wallet to pay.','ok')}}catch(e){}
@@ -430,31 +513,114 @@ $('sIn').onchange=$('sOut').onchange=sCheck;
 try{localStorage.removeItem('stv_kit_key')}catch(e){}
 $('sFlip').onclick=()=>{const a=$('sIn').value;$('sIn').value=$('sOut').value;$('sOut').value=a;sCheck()};
 $('swap').onclick=async()=>{
+ let started=false;
  try{
   if(!acct)throw new Error('Connect your wallet first');
-  
-  const a=$('sAmt').value.trim();if(!amtOk(a,await tokDec($('sIn').value)))throw new Error('Enter a valid amount, for example 1.25');
-  $('swap').disabled=true;say('Loading Circle App Kit…');
-  const{kit,adapter}=await getKit();say('Confirm the swap in MetaMask…');
-  const r=await kit.swap({from:{adapter,chain:'Arc_Testnet'},tokenIn:tk($('sIn').value),tokenOut:tk($('sOut').value),amountIn:a});
-  const h=r&&(r.txHash||r.hash);okMsg('Swap submitted. ',h&&N.blockExplorerUrls[0]+'tx/'+h);
- }catch(e){say(e.code===4001?'Swap rejected in MetaMask.':netErr(e),'err')}
- finally{sCheck()}
+  const inK=$('sIn').value,outK=$('sOut').value;
+  const a=$('sAmt').value.trim();if(!amtOk(a,await tokDec(inK)))throw new Error('Enter a valid amount, for example 1.25');
+  $('swap').disabled=true;window.__busy=true;say('');
+  const rows=(extra)=>[['Swap',inK+' → '+outK],['Network','Arc Testnet (chain 5042002)'],['From',acct]].concat(extra||[]);
+  await ensureChain('Arc_Testnet');
+  started=true;txCard({title:'Swap '+inK+' to '+outK,status:'Preparing',cls:'pend',rows:rows([['You pay',a+' '+inK]]),note:'Loading Circle App Kit…'});
+  const{kit,adapter}=await getKit();
+  const p={from:{adapter,chain:'Arc_Testnet'},tokenIn:tk(inK),tokenOut:tk(outK),amountIn:a};
+  let est=null;try{est=await kit.estimateSwap(p);dlog('swap:estimate',est)}catch(e){dlog('swap:estimate-error',errInfo(e))}
+  const estTxt=est&&est.estimatedOutput?est.estimatedOutput.amount+' '+outK:null;
+  txCard({title:'Swap '+inK+' to '+outK,status:'Waiting for MetaMask',cls:'pend',rows:rows([['You pay',a+' '+inK],['Estimated to receive',estTxt]]),note:'Confirm each prompt in MetaMask. The estimate can differ from the final amount.'});
+  const r=await kit.swap(p);dlog('swap:result',r);
+  const h=r&&r.txHash;
+  const fees=r&&Array.isArray(r.fees)&&r.fees.length?r.fees.map(f=>f.amount+' '+f.token+(f.type?' ('+f.type+')':'')).join(', '):null;
+  const done=(extra)=>rows([['You paid',((r&&r.amountIn)||a)+' '+inK],['You received',r&&r.amountOut?r.amountOut+' '+outK:null],['Estimated to receive',r&&r.amountOut?null:estTxt],['To',r&&r.toAddress],['Fees',fees],['Transaction',h?sh(h):null],['Explorer',h?mkLink(exTx('Arc_Testnet',h),'View on Arcscan'):null]].concat(extra||[]));
+  if(!h){txCard({title:'Swap '+inK+' to '+outK,status:'Not confirmed yet',cls:'pend',rows:done(),note:'The swap returned no transaction hash. Check your wallet activity before trying again.'});return}
+  txCard({title:'Swap '+inK+' to '+outK,status:'Pending',cls:'pend',rows:done(),note:'Submitted. Waiting for the network to confirm…'});
+  const rc=await waitReceipt(h);dlog('swap:receipt',rc);const st=rcState(rc);
+  if(st==='ok')txCard({title:'Swap '+inK+' to '+outK,status:'Confirmed',cls:'ok',rows:done([['Block',rcBlock(rc)]]),note:r&&r.amountOut?'The swap is confirmed on Arc Testnet.':'The swap is confirmed. The final received amount was not reported, so check your balance.'});
+  else if(st==='fail')txCard({title:'Swap '+inK+' to '+outK,status:'Failed',cls:'fail',rows:done(),note:'The transaction reverted. No tokens were swapped.'});
+  else txCard({title:'Swap '+inK+' to '+outK,status:'Not confirmed yet',cls:'pend',rows:done(),note:'No receipt after 60 seconds. Check the explorer before trying again.'});
+  setTimeout(refresh,1000);
+ }catch(e){
+  dlog('swap:error',errInfo(e));
+  const msg=e.code===4001?'You rejected the request in MetaMask. Nothing was swapped.':netErr(e);
+  if(started)txCard({title:'Swap',status:e.code===4001?'Rejected':'Failed',cls:'fail',note:msg});else say(msg,'err');
+ }
+ finally{sCheck();window.__busy=false;syncNet()}
 };
+
+/* ----- Bridge ----- */
+let lastBridge=null,bridgeRun=false,hooked=false;
+function verifyRoute(kit,f,t){
+ if(typeof kit.getSupportedChains!=='function'){dlog('bridge:supported-chains','getSupportedChains is not available in this SDK build');return}
+ let list;try{list=kit.getSupportedChains()}catch(e){dlog('bridge:supported-chains-error',errInfo(e));return}
+ const nm=c=>c&&(c.chain||c.name||c.chainName);const names=(list||[]).map(nm).filter(Boolean);
+ dlog('bridge:supported-chains',{count:names.length,names,route:(list||[]).filter(c=>[f,t].includes(nm(c))).map(c=>({chain:nm(c),cctp:c.cctp}))},true);
+ if(names.length>=3){const miss=[f,t].filter(x=>!names.includes(x));if(miss.length)throw new Error('This version of Circle App Kit does not support: '+miss.join(', ')+'. The bridge was not started.')}}
+function hookEvents(kit){if(hooked||!kit.on)return;hooked=true;
+ try{kit.on('*',p=>{dlog('bridge:event',p);const n=p&&(p.method||p.name||p.action||p.type);const el=document.querySelector('#txc .fine');if(bridgeRun&&el)el.textContent='In progress. Latest update: '+(n?String(n):'working')+'. Keep this tab open.'})}catch(e){dlog('bridge:hook-error',errInfo(e))}}
+function bNoteUpdate(){
+ const f=$('bFrom').value,t=$('bTo').value;let x='Bridging uses Circle CCTP, which moves USDC only. EURC and cirBTC cannot be bridged this way.';
+ if(f===t)x='Pick two different networks.';
+ else if(f!=='Arc_Testnet'&&t!=='Arc_Testnet')x='One side of the bridge must be Arc Testnet.';
+ else if(t==='Arc_Testnet')x+=' Into Arc: you need USDC and a little '+CH[f].gas+' on '+CH[f].n+' for gas, plus a small USDC balance on Arc to pay for the final mint step.';
+ else x+=' Out of Arc: you need USDC on Arc for the bridge and gas, plus a little '+CH[t].gas+' on '+CH[t].n+' for the final mint step.';
+ $('bNote').textContent=x}
+(function(){const r=document.createElement('div');r.id='bFlipRow';const b=document.createElement('button');b.type='button';b.id='bFlip';b.textContent='⇅ Reverse direction';
+ b.onclick=()=>{const f=$('bFrom').value;$('bFrom').value=$('bTo').value;$('bTo').value=f;bNoteUpdate()};r.appendChild(b);$('bTo').insertAdjacentElement('afterend',r);
+ $('bFrom').onchange=$('bTo').onchange=bNoteUpdate;bNoteUpdate()})();
+const stepLabel=(n,f,t)=>({approve:'Approve USDC on '+CH[f].n,burn:'Burn on '+CH[f].n+' (source)',fetchAttestation:'Circle attestation',mint:'Mint on '+CH[t].n+' (destination)'}[n]||n||'Step');
+const stepState=s=>({success:'Confirmed',error:'Failed',pending:'Pending'}[s]||String(s||'Unknown'));
+function renderBridge(r,f,t,a){
+ const steps=(r&&r.steps||[]).map(s=>{const chain=(s.name==='mint')?t:f;const url=safeUrl(s.explorerUrl)||(s.txHash&&s.name!=='fetchAttestation'?exTx(chain,s.txHash):null);return{label:stepLabel(s.name,f,t),state:stepState(s.state),url}});
+ const get=n=>(r&&r.steps||[]).find(s=>s.name===n);
+ const burn=get('burn'),mint=get('mint');
+ const srcOk=!!(burn&&burn.state==='success'),dstOk=!!(mint&&mint.state==='success');
+ const title='Bridge USDC: '+CH[f].n+' → '+CH[t].n;
+ const rows=[['Token','USDC'],['Amount',a+' USDC'],['From network',CH[f].n],['To network',CH[t].n],['Wallet',acct],['Source chain',srcOk?'Confirmed':'Not confirmed'],['Destination chain',dstOk?'Completed':'Not completed']];
+ if(r&&r.state==='success'&&dstOk){txCard({title,status:'Completed',cls:'ok',rows,steps,note:'USDC was minted on '+CH[t].n+'. Your balance can take a moment to update.'});return'ok'}
+ if(r&&r.state==='success'){txCard({title,status:'Completed',cls:'ok',rows,steps,note:'Circle App Kit reports the bridge as successful. Open the step links to verify each transaction.'});return'ok'}
+ if(r&&r.state==='error'){const bad=(r.steps||[]).find(s=>s.state==='error');
+  const why=bad?(stepLabel(bad.name,f,t)+': '+(bad.errorMessage||bad.error||'failed')):'The bridge stopped before finishing.';
+  lastBridge={r,f,t,a};
+  txCard({title,status:'Failed',cls:'fail',rows,steps,note:(srcOk?'The source transaction is confirmed, but the destination step did not finish. Your USDC is not lost: press Resume to finish. ':'The bridge did not complete. ')+why,actions:[['Resume bridge',resumeBridge]]});return'error'}
+ txCard({title,status:'In progress',cls:'pend',rows,steps,note:'The bridge is not finished yet (state: '+String(r&&r.state)+'). Check the step links.'});return'pending'}
+async function resumeBridge(btn){
+ if(!lastBridge)return;const{r,f,t,a}=lastBridge;
+ try{btn.disabled=true;window.__busy=true;btn.textContent='Resuming…';
+  const burn=(r.steps||[]).find(s=>s.name==='burn');await ensureChain(burn&&burn.state==='success'?t:f);
+  const{kit,adapter}=await getKit();hookEvents(kit);if(!kit.retry)throw new Error('Resume is not available in this App Kit version');
+  bridgeRun=true;dlog('bridge:retry-start',{f,t,a});
+  const rr=await kit.retry(r,{from:adapter,to:adapter});dlog('bridge:retry-result',rr);
+  const out=renderBridge(rr,f,t,a);if(out==='ok'){lastBridge=null;if(t==='Arc_Testnet'){try{await ensureChain('Arc_Testnet')}catch(e){}}setTimeout(refresh,1500)}
+ }catch(e){dlog('bridge:retry-error',errInfo(e));btn.disabled=false;btn.textContent='Resume bridge';const el=document.querySelector('#txc .fine');if(el)el.textContent=(e.code===4001?'You rejected the request in MetaMask.':netErr(e))}
+ finally{bridgeRun=false;window.__busy=false;syncNet()}
+}
 $('bridge').onclick=async()=>{
+ let started=false;
  try{
   if(!acct)throw new Error('Connect your wallet first');
   const f=$('bFrom').value,t=$('bTo').value;
   if(f===t)throw new Error('Pick two different networks');
   if(f!=='Arc_Testnet'&&t!=='Arc_Testnet')throw new Error('One side of the bridge must be Arc Testnet');
+  if(!CH[f]||!CH[t])throw new Error('Unsupported network');
   const a=$('bAmt').value.trim();if(!AMT.test(a)||Number(a)<=0)throw new Error('Enter a valid amount, for example 1.25');
-  $('bridge').disabled=true;say('Loading Circle App Kit…');
-  const{kit,adapter}=await getKit();say('Confirm each step in MetaMask. A bridge needs several approvals and can take a few minutes…');
-  const r=await kit.bridge({from:{adapter,chain:f},to:{adapter,chain:t},amount:a});
-  if(r&&r.state==='error')throw new Error('The bridge did not finish. Try again to resume it.');
-  const u=((r&&r.steps)||[]).map(x=>x.explorerUrl).filter(Boolean).pop();okMsg('Bridge complete. ',u);
- }catch(e){say(e.code===4001?'Bridge rejected in MetaMask.':netErr(e),'err')}
- finally{$('bridge').disabled=false}
+  $('bridge').disabled=true;window.__busy=true;say('');
+  const title='Bridge USDC: '+CH[f].n+' → '+CH[t].n;
+  const base=[['Token','USDC'],['Amount',a+' USDC'],['From network',CH[f].n],['To network',CH[t].n],['Wallet',acct]];
+  started=true;txCard({title,status:'Preparing',cls:'pend',rows:base,note:'Switching MetaMask to '+CH[f].n+'…'});
+  dlog('bridge:start',{from:f,to:t,amount:a,walletChainBefore:await eth().request({method:'eth_chainId'})});
+  await ensureChain(f);
+  txCard({title,status:'Preparing',cls:'pend',rows:base,note:'Loading Circle App Kit…'});
+  const{kit,adapter}=await getKit();hookEvents(kit);verifyRoute(kit,f,t);
+  txCard({title,status:'Waiting for MetaMask',cls:'pend',rows:base,note:'Confirm each prompt in MetaMask. A bridge needs several approvals and can take a few minutes. Keep this tab open.'});
+  bridgeRun=true;
+  const r=await kit.bridge({from:{adapter,chain:f},to:{adapter,chain:t},amount:a});dlog('bridge:result',r);
+  const out=renderBridge(r,f,t,a);
+  if(out==='ok'){lastBridge=null;if(t==='Arc_Testnet'){try{await ensureChain('Arc_Testnet')}catch(e){}}setTimeout(refresh,1500)}
+ }catch(e){
+  dlog('bridge:error',errInfo(e));
+  const msg=e.code===4001?'You rejected the request in MetaMask. If this was mid-bridge, check the explorer before retrying.':netErr(e);
+  if(started)txCard({title:'Bridge',status:e.code===4001?'Rejected':'Failed',cls:'fail',note:msg});else say(msg,'err');
+ }
+ finally{bridgeRun=false;$('bridge').disabled=false;window.__busy=false;syncNet()}
 };
 sCheck();
 </script>
