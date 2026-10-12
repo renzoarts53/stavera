@@ -176,6 +176,21 @@ h1{font-size:clamp(46px,6.4vw,118px);margin-bottom:22px}
 .fi{flex:none;width:48px;height:48px;border-radius:50%;background:var(--soft);display:grid;place-items:center}
 .fi svg{width:22px;height:22px;stroke:var(--acc);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 @media(max-width:860px){.feat li{padding:0 14px}.feat li:first-child{padding-left:0}.fi{width:40px;height:40px}}
+#txc{margin-top:14px;border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:16px 18px;font-size:14px;color:var(--ink)}
+#txc[hidden]{display:none}
+#txc .th{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
+#txc .tt{font-weight:700;font-size:15px}
+#txc .bd{font:700 12px Inter,sans-serif;padding:4px 10px;border-radius:999px;background:var(--soft);color:var(--acc);white-space:nowrap}
+#txc .bd.ok{background:#e6f6ee;color:#157347}#txc .bd.fail{background:#fdecec;color:#b42318}#txc .bd.pend{background:#fff4e0;color:#9a5b00}
+#txc dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0}
+#txc dt{color:var(--mute)}#txc dd{margin:0;word-break:break-all;font-weight:600}
+#txc a{color:var(--acc);font-weight:600;text-decoration:none}#txc a:hover{text-decoration:underline}
+#txc ol{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
+#txc li{display:flex;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:10px}
+#txc .row2{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+#txc button{border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:8px 12px;font:600 13px Inter,sans-serif;cursor:pointer;color:var(--ink)}
+#bFlipRow{display:flex;justify-content:center;margin:8px 0}
+#bFlipRow button{border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:6px 14px;font:600 13px Inter,sans-serif;cursor:pointer;color:var(--acc)}
 </style>
 </head>
 <body>
@@ -235,7 +250,7 @@ h1{font-size:clamp(46px,6.4vw,118px);margin-bottom:22px}
 <div class="pair"><input id="bAmt" inputmode="decimal" placeholder="0.00" autocomplete="off"><select id="bTok" aria-label="Coin to bridge"><option>USDC</option><option disabled>EURC</option><option disabled>cirBTC</option></select></div>
 <div class="row"><button class="btn lg" id="bridge">Bridge</button></div>
 <p class="fine tb"></p>
-<p class="fine">Bridging uses Circle CCTP, which moves USDC only. EURC and cirBTC cannot be bridged this way. You need gas on both networks (USDC on Arc, ETH on Sepolia networks).</p>
+<p class="fine" id="bNote">Bridging uses Circle CCTP, which moves USDC only. EURC and cirBTC cannot be bridged this way. You need gas on both networks (USDC on Arc, ETH on Sepolia networks).</p>
 </div>
 <div id="msg" role="status"></div>
 </div></div>
@@ -324,7 +339,9 @@ async function dash(){if(!acct)return;renderTx();
   const k=Math.min(20,n),g=h=>eth().request({method:'eth_getBlockByNumber',params:['0x'+h.toString(16),false]});
   const[x,y]=await Promise.all([g(n),g(n-k)]);const dt=(parseInt(x.timestamp,16)-parseInt(y.timestamp,16))/k;
   $('dBt').textContent=dt>0?dt.toFixed(2)+'s':'< 1s'}catch(e){$('dBlk').textContent='Unavailable';$('dBt').textContent='Unavailable'}}
-async function refresh(){if(!acct)return;dash();refreshTokens();try{$('dBal').textContent=$('bal').textContent=fmt(BigInt(await eth().request({method:'eth_getBalance',params:[acct,'latest']})))+' USDC'}catch(e){say('Could not read your balance: '+(e.message||e),'err')}}
+async function onArc(){return String(await eth().request({method:'eth_chainId'})).toLowerCase()===N.chainId.toLowerCase()}
+function syncNet(){onArc().then(ok=>{if(ok)show();else{$('net').textContent='Wrong network';$('netw').classList.remove('on')}refresh()}).catch(()=>{})}
+async function refresh(){if(!acct)return;try{if(!(await onArc())){$('dBal').textContent=$('bal').textContent='Switch to Arc Testnet';$('dBt').textContent=$('dBlk').textContent='—';return}}catch(e){return}dash();refreshTokens();try{$('dBal').textContent=$('bal').textContent=fmt(BigInt(await eth().request({method:'eth_getBalance',params:[acct,'latest']})))+' USDC'}catch(e){say('Could not read your balance: '+(e.message||e),'err')}}
 async function switchToArc(){
  try{await eth().request({method:'wallet_switchEthereumChain',params:[{chainId:N.chainId}]})}
  catch(e){
@@ -352,19 +369,107 @@ async function connect(){
   ['connectTop','connectHero','connectHow'].forEach(i=>{$(i).textContent='Connected';$(i).disabled=true});toast('Wallet connected to Arc Testnet.','ok');refresh();
  }catch(e){acct=null;toast(e.code===4001?'Request rejected in MetaMask.':'Connection failed: '+(e.message||e),'err');say(e.code===4001?'Request rejected in MetaMask.':'Connection failed: '+(e.message||e),'err')}
 }
+
+/* ===== Transaction status, chain helpers and diagnostics ===== */
+const CH={
+ Arc_Testnet:{id:5042002,n:'Arc Testnet',ex:'https://testnet.arcscan.app/'},
+ Ethereum_Sepolia:{id:11155111,n:'Ethereum Sepolia',ex:'https://sepolia.etherscan.io/',rpc:'https://ethereum-sepolia-rpc.publicnode.com',gas:'ETH',cur:{name:'Sepolia Ether',symbol:'ETH',decimals:18}},
+ Base_Sepolia:{id:84532,n:'Base Sepolia',ex:'https://sepolia.basescan.org/',rpc:'https://sepolia.base.org',gas:'ETH',cur:{name:'Ether',symbol:'ETH',decimals:18}},
+ Arbitrum_Sepolia:{id:421614,n:'Arbitrum Sepolia',ex:'https://sepolia.arbiscan.io/',rpc:'https://sepolia-rollup.arbitrum.io/rpc',gas:'ETH',cur:{name:'Ether',symbol:'ETH',decimals:18}}
+};
+const chHex=k=>'0x'+CH[k].id.toString(16);
+/* CCTP V2 testnet values, checked against Circle docs: domains and the MessageTransmitterV2 address (same on all listed testnets) */
+const CCTP={domain:{Ethereum_Sepolia:0,Base_Sepolia:6,Arbitrum_Sepolia:3,Arc_Testnet:26},MT:'0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',SEL:{receive:'0x57ecfd28',used:'0xfeb61724',local:'0x8d3638f4'}};
+const IRIS='https://iris-api-sandbox.circle.com/v2/messages/';
+const keyByDomain=d=>Object.keys(CCTP.domain).find(k=>CCTP.domain[k]===Number(d));
+const wreq=(method,params)=>eth().request({method,params});
+const chainNow=async()=>String(await wreq('eth_chainId')).toLowerCase();
+const nap=ms=>new Promise(r=>setTimeout(r,ms));
+async function waitChain(want,ms){const t0=Date.now();while(Date.now()-t0<ms){if(await chainNow()===want)return true;await nap(400)}return false}
+const addParams=k=>k==='Arc_Testnet'?N:{chainId:chHex(k),chainName:CH[k].n,rpcUrls:[CH[k].rpc],nativeCurrency:CH[k].cur,blockExplorerUrls:[CH[k].ex]};
+const unknownChain=e=>e&&(e.code===4902||/unrecognized chain|not been added|try adding the chain|chain.*not.*added/i.test(String(e.message||'')+String(e.shortMessage||'')));
+function walletMsg(e){const m=String(e&&(e.shortMessage||e.message)||e);
+ if(e&&e.code===4001)return 'You rejected the request in MetaMask. Nothing was sent. Press the button again when you are ready.';
+ if(e&&e.code===-32002)return 'MetaMask already has a request waiting. Open the MetaMask window, approve or reject it, then try again.';
+ if(e&&(e.code===4900||e.code===4901)||/disconnected/i.test(m))return 'MetaMask is disconnected. Reconnect your wallet and try again.';
+ return netErr(e)}
+/* Make sure the wallet is REALLY on network k. Adds the network if MetaMask does not know it, then verifies with eth_chainId. */
+async function ensureNetwork(k){
+ const want=chHex(k),WAIT=window.STV_WAIT||15000;
+ if(await chainNow()===want)return;
+ try{await wreq('wallet_switchEthereumChain',[{chainId:want}])}
+ catch(e){
+  if(!unknownChain(e)||!(k==='Arc_Testnet'||CH[k].rpc))throw e;
+  dlog('network:add',{network:k});
+  await wreq('wallet_addEthereumChain',[addParams(k)]);
+ }
+ if(await waitChain(want,WAIT))return;
+ try{await wreq('wallet_switchEthereumChain',[{chainId:want}])}catch(e){if(!unknownChain(e))throw e}
+ if(!(await waitChain(want,WAIT)))throw new Error('MetaMask did not switch to '+CH[k].n+'. Open MetaMask, select '+CH[k].n+' yourself, then press the button again.');
+}
+const ensureChain=ensureNetwork;
+const DIAG=[];window.stvDiag=DIAG;
+function errInfo(e){return{name:e&&e.name,message:e&&e.message,shortMessage:e&&e.shortMessage,code:e&&e.code,cause:e&&e.cause&&(e.cause.message||String(e.cause))}}
+function dlog(kind,data,raw){let d;try{let j=JSON.stringify(data,(k,v)=>typeof v==='bigint'?v.toString():v);if(!raw)j=j.replace(/\b0x[0-9a-fA-F]{40}\b/g,m=>m.slice(0,6)+'…'+m.slice(-4));d=JSON.parse(j)}catch(e){d=String(data)}
+ DIAG.push({t:new Date().toISOString(),kind,data:d});if(DIAG.length>80)DIAG.shift();try{console.log('[stavera]',kind,d)}catch(e){}}
+function diagReport(){return JSON.stringify({generated:new Date().toISOString(),site:location.host,wallet:acct?acct.slice(0,6)+'…'+acct.slice(-4):null,entries:DIAG},null,2)}
+async function copyDiag(btn){const t=diagReport();try{await navigator.clipboard.writeText(t);btn.textContent='Copied. Paste it into the chat.'}catch(e){window.prompt('Copy this report:',t)}}
+function mkLink(u,t){const a=document.createElement('a');a.href=u;a.target='_blank';a.rel='noopener';a.textContent=t;return a}
+const safeUrl=u=>typeof u==='string'&&/^https:\/\//.test(u)?u:null;
+const sh=a=>a&&String(a).length>12?String(a).slice(0,6)+'…'+String(a).slice(-4):a;
+const exTx=(k,h)=>h?CH[k].ex+'tx/'+h:null;
+function txCard(o){
+ let c=$('txc');if(!c){c=document.createElement('div');c.id='txc';c.setAttribute('role','status');$('msg').after(c)}
+ c.hidden=false;c.textContent='';
+ const h=document.createElement('div');h.className='th';
+ const t=document.createElement('span');t.className='tt';t.textContent=o.title;
+ const b=document.createElement('span');b.className='bd '+(o.cls||'');b.textContent=o.status;h.append(t,b);c.appendChild(h);
+ if(o.rows){const dl=document.createElement('dl');
+  o.rows.filter(r=>r[1]!=null&&r[1]!=='').forEach(([k,v])=>{const dt=document.createElement('dt');dt.textContent=k;const dd=document.createElement('dd');if(v instanceof Node)dd.appendChild(v);else dd.textContent=v;dl.append(dt,dd)});
+  c.appendChild(dl)}
+ if(o.steps&&o.steps.length){const ol=document.createElement('ol');
+  o.steps.forEach(s=>{const li=document.createElement('li');const l=document.createElement('span');l.textContent=s.label;const r=document.createElement('span');
+   if(s.url)r.appendChild(mkLink(s.url,s.state));else r.textContent=s.state;li.append(l,r);ol.appendChild(li)});c.appendChild(ol)}
+ if(o.note){const p=document.createElement('p');p.className='fine';p.textContent=o.note;c.appendChild(p)}
+ const r2=document.createElement('div');r2.className='row2';
+ (o.actions||[]).forEach(([lbl,fn])=>{const x=document.createElement('button');x.type='button';x.textContent=lbl;x.onclick=()=>fn(x);r2.appendChild(x)});
+ const dg=document.createElement('button');dg.type='button';dg.textContent='Copy diagnostic report';dg.onclick=()=>copyDiag(dg);r2.appendChild(dg);c.appendChild(r2);
+}
+async function waitReceipt(h,ms){const t0=Date.now();ms=ms||60000;
+ while(Date.now()-t0<ms){try{const r=await eth().request({method:'eth_getTransactionReceipt',params:[h]});if(r)return r}catch(e){}await new Promise(r=>setTimeout(r,1000))}
+ return null}
+const rcState=r=>!r?'unk':(r.status==='0x1'?'ok':'fail');
+const rcBlock=r=>r&&r.blockNumber?parseInt(r.blockNumber,16).toLocaleString():null;
+
 async function send(){
+ if(window.__busy){say('Another Stavera transaction is still in progress. Wait for it to finish.','err');return}
+ let started=false;
  try{
   if(!acct)throw new Error('Connect your wallet first');
   const to=$('to').value.trim();
   if(!ADDR.test(to))throw new Error('Enter a valid 0x address');
   if(/^0x0{40}$/.test(to))throw new Error('Sending to the zero address reverts on Arc');
   const v=parseAmt($('amt').value.trim());if(v<=0n)throw new Error('Amount must be greater than zero');
-  $('send').disabled=true;say('Confirm the transfer in MetaMask…');
-  const h=await eth().request({method:'eth_sendTransaction',params:[{from:acct,to,value:'0x'+v.toString(16)}]});logTx(h,to,$('amt').value.trim());
-  const m=$('msg');m.className='ok';m.textContent='Transfer submitted. ';
-  const l=document.createElement('a');l.href=N.blockExplorerUrls[0]+'tx/'+h;l.target='_blank';l.rel='noopener';l.textContent='View transaction';m.appendChild(l);setTimeout(refresh,1500);
- }catch(e){say(e.code===4001?'Transfer rejected in MetaMask.':(e.message||String(e)),'err')}
- finally{$('send').disabled=false}
+  const amtTxt=$('amt').value.trim();
+  $('send').disabled=true;window.__busy=true;say('');
+  const rows=(h,extra)=>[['Token','USDC'],['Amount',amtTxt+' USDC'],['From',acct],['To',to],['Network','Arc Testnet (chain 5042002)'],['Transaction',h?sh(h):null],['Explorer',h?mkLink(exTx('Arc_Testnet',h),'View on Arcscan'):null]].concat(extra||[]);
+  await ensureChain('Arc_Testnet');
+  started=true;txCard({title:'Send USDC',status:'Waiting for MetaMask',cls:'pend',rows:rows(),note:'Confirm the transfer in your wallet.'});
+  const h=await eth().request({method:'eth_sendTransaction',params:[{from:acct,to,value:'0x'+v.toString(16)}]});
+  dlog('send:submitted',{hash:h,to,amount:amtTxt});
+  txCard({title:'Send USDC',status:'Pending',cls:'pend',rows:rows(h),note:'Submitted. Waiting for the network to confirm…'});
+  const rc=await waitReceipt(h);dlog('send:receipt',rc);
+  const st=rcState(rc);
+  if(st==='ok'){logTx(h,to,amtTxt);txCard({title:'Send USDC',status:'Confirmed',cls:'ok',rows:rows(h,[['Block',rcBlock(rc)]]),note:'The transfer is confirmed on Arc Testnet.'})}
+  else if(st==='fail')txCard({title:'Send USDC',status:'Failed',cls:'fail',rows:rows(h,[['Block',rcBlock(rc)]]),note:'The transaction was included but reverted. No USDC was transferred.'});
+  else txCard({title:'Send USDC',status:'Not confirmed yet',cls:'pend',rows:rows(h),note:'No receipt after 60 seconds. Open the explorer link to check before sending again.'});
+  setTimeout(refresh,1000);
+ }catch(e){
+  dlog('send:error',errInfo(e));
+  const msg=e.code===4001?'You rejected the request in MetaMask. Nothing was sent.':(e.message||String(e));
+  if(started)txCard({title:'Send USDC',status:e.code===4001?'Rejected':'Failed',cls:'fail',note:msg});else say(e.code===4001?'Transfer rejected in MetaMask.':msg,'err');
+ }
+ finally{$('send').disabled=false;window.__busy=false;syncNet()}
 }
 let link='';
 $('mk').onclick=()=>{
@@ -382,7 +487,7 @@ document.querySelectorAll('.tabs [data-t]').forEach(b=>b.onclick=()=>{
 
 if(eth()){
  eth().on&&eth().on('chainChanged',id=>{
-  if(!acct)return;
+  if(!acct||window.__busy)return;
   if(id.toLowerCase()!==N.chainId.toLowerCase()){$('net').textContent='Wrong network';$('netw').classList.remove('on');say('Please switch back to Arc Testnet.','err')}
   else{show();say('Connected to Arc Testnet.','ok');refresh()}
  });
@@ -391,7 +496,7 @@ if(eth()){
 document.querySelectorAll('.faq details').forEach(d=>d.addEventListener('toggle',()=>{if(d.open)document.querySelectorAll('.faq details[open]').forEach(o=>{if(o!==d)o.open=false})}));
 $('connectTop').onclick=connect;$('connectHero').onclick=connect;$('connectHow').onclick=connect;$('send').onclick=send;
 $('copy').onclick=async()=>{if(!acct)return say('Connect your wallet first','err');try{await navigator.clipboard.writeText(acct);say('Address copied.','ok')}catch(e){say('Copy failed. Select the address and copy it manually.','err')}};
-if(eth()&&eth().on){eth().on('accountsChanged',a=>{if(a[0]){acct=a[0];show();refresh()}else location.reload()});eth().on('chainChanged',refresh)}
+if(eth()&&eth().on){eth().on('accountsChanged',a=>{if(a[0]){acct=a[0];show();refresh()}else location.reload()});eth().on('chainChanged',()=>{if(!window.__busy)refresh()})}
 // Open a payment link: prefill the Send tab
 try{const q=new URLSearchParams(location.search),to=q.get('to'),amt=q.get('amt');
  if(ADDR.test(to||'')&&/^\d+(\.\d+)?$/.test(amt||'')){$('to').value=to;$('amt').value=amt;say('Payment request: '+amt+' USDC to '+to.slice(0,6)+'…'+to.slice(-4)+'. Connect your wallet to pay.','ok')}}catch(e){}
@@ -409,16 +514,19 @@ function netErr(e){const m=String(e&&(e.shortMessage||e.message)||e);
   const blocked=/claudeusercontent\.com|claude\.ai/.test(location.host)||window.self!==window.top;
   return blocked?'This preview blocks calls to Circle and the network RPC, so MetaMask never opens. Host the page on your own site (Netlify, Vercel or GitHub Pages) and swap and bridge will work.':'Could not reach Circle or the Arc RPC. Check your connection, disable any ad or privacy blocker for this site, and try again.'}
  return m}
-let kitP;
-function getKit(){return kitP||(kitP=(async()=>{
- const[{AppKit},{createViemAdapterFromProvider},{createPublicClient,custom,http}]=await Promise.all([import('https://cdn.jsdelivr.net/npm/@circle-fin/app-kit/+esm'),import('https://cdn.jsdelivr.net/npm/@circle-fin/adapter-viem-v2/+esm'),import('https://cdn.jsdelivr.net/npm/viem@2.21.0/+esm')]);
- const provider=eth();
- // Route reads through MetaMask when the wallet is on that chain (needed where direct RPC calls are blocked); otherwise use the chain's own RPC.
- const getPublicClient=({chain})=>{const direct=http()({chain});
-  return createPublicClient({chain,transport:custom({request:async args=>{
-   try{const cid=parseInt(await provider.request({method:'eth_chainId'}),16);if(cid===chain.id)return await provider.request(args)}catch(e){}
-   return direct.request(args)}})})};
- return{kit:new AppKit(),adapter:await createViemAdapterFromProvider({provider,getPublicClient})}})().catch(e=>{kitP=null;throw e}))}
+let kitLib=null,kitInst=null;
+async function getKit(){
+ if(!kitLib)kitLib=(async()=>{
+  const[{AppKit},{createViemAdapterFromProvider},{createPublicClient,custom,http}]=await Promise.all([import('https://cdn.jsdelivr.net/npm/@circle-fin/app-kit/+esm'),import('https://cdn.jsdelivr.net/npm/@circle-fin/adapter-viem-v2/+esm'),import('https://cdn.jsdelivr.net/npm/viem@2.21.0/+esm')]);
+  // Route reads through MetaMask only when the wallet is on that chain; otherwise use the chain's own RPC.
+  const getPublicClient=({chain})=>{const direct=http()({chain});
+   return createPublicClient({chain,transport:custom({request:async args=>{
+    try{const cid=parseInt(await eth().request({method:'eth_chainId'}),16);if(cid===chain.id)return await eth().request(args)}catch(e){}
+    return direct.request(args)}})})};
+  return{AppKit,createViemAdapterFromProvider,getPublicClient}})().catch(e=>{kitLib=null;throw e});
+ const L=await kitLib;kitInst=kitInst||new L.AppKit();
+ // A NEW adapter every time: never reuse wallet/chain state from an earlier swap or bridge.
+ return{kit:kitInst,adapter:await L.createViemAdapterFromProvider({provider:eth(),getPublicClient:L.getPublicClient})}}
 function okMsg(t,u){const m=$('msg');m.className='ok';m.textContent=t;if(u){const l=document.createElement('a');l.href=u;l.target='_blank';l.rel='noopener';l.textContent='View transaction';m.appendChild(l)}setTimeout(refresh,1500)}
 const AMT=/^\d+(\.\d{1,6})?$/;
 function amtOk(a,d){return new RegExp('^\\d+(\\.\\d{1,'+d+'})?$').test(a)&&Number(a)>0}
@@ -429,32 +537,277 @@ function sCheck(){const a=$('sIn').value,b=$('sOut').value;let t='Swaps run thro
 $('sIn').onchange=$('sOut').onchange=sCheck;
 try{localStorage.removeItem('stv_kit_key')}catch(e){}
 $('sFlip').onclick=()=>{const a=$('sIn').value;$('sIn').value=$('sOut').value;$('sOut').value=a;sCheck()};
+/* ----- Swap: every token, chain and balance is verified before the SDK is called ----- */
+const TOK_EXPECT={USDC:6,EURC:6,cirBTC:8}; // decimals from Circle/Arc docs; confirmed on-chain before each swap
+const tokOk={};
+async function verifyToken(k){
+ if(tokOk[k])return;const t=TOK[k];
+ const code=await wreq('eth_getCode',[t.a,'latest']);
+ if(!code||code==='0x')throw new Error(k+' was not found at its official Arc Testnet address. Swap blocked for safety.');
+ const d=Number(BigInt(await wreq('eth_call',[{to:t.a,data:'0x313ce567'},'latest'])));
+ if(d!==TOK_EXPECT[k])throw new Error(k+' reports '+d+' decimals but '+TOK_EXPECT[k]+' were expected. Swap blocked for safety.');
+ t.d=d;tokOk[k]=true;dlog('swap:token-verified',{token:k,address:t.a,decimals:d},true)}
+const toUnits=(a,d)=>{const[i,f='']=String(a).split('.');return BigInt(i)*10n**BigInt(d)+BigInt((f+'0'.repeat(d)).slice(0,d)||'0')};
+async function permitInfo(k){
+ const info={token:k};
+ try{const r=await wreq('eth_call',[{to:TOK[k].a,data:'0x3644e515'},'latest']);info.eip2612DomainSeparator=!!r&&!/^0x0*$/.test(r)}catch(e){info.eip2612DomainSeparator=false}
+ try{await wreq('eth_call',[{to:TOK[k].a,data:'0x7ecebe00'+acct.slice(2).toLowerCase().padStart(64,'0')},'latest']);info.nonces=true}catch(e){info.nonces=false}
+ return info}
+async function tokBal(k){return BigInt(await wreq('eth_call',[{to:TOK[k].a,data:'0x70a08231'+acct.slice(2).toLowerCase().padStart(64,'0')},'latest']))}
+const chainMismatch=e=>/must match the active chainId|active chainId|does not match the target chain|Permit generation failed/i.test(String(e&&(e.shortMessage||e.message)||e));
 $('swap').onclick=async()=>{
+ if(window.__busy){say('Another Stavera transaction is still in progress. Wait for it to finish.','err');return}
+ let started=false;
  try{
   if(!acct)throw new Error('Connect your wallet first');
-  
-  const a=$('sAmt').value.trim();if(!amtOk(a,await tokDec($('sIn').value)))throw new Error('Enter a valid amount, for example 1.25');
-  $('swap').disabled=true;say('Loading Circle App Kit…');
-  const{kit,adapter}=await getKit();say('Confirm the swap in MetaMask…');
-  const r=await kit.swap({from:{adapter,chain:'Arc_Testnet'},tokenIn:tk($('sIn').value),tokenOut:tk($('sOut').value),amountIn:a});
-  const h=r&&(r.txHash||r.hash);okMsg('Swap submitted. ',h&&N.blockExplorerUrls[0]+'tx/'+h);
- }catch(e){say(e.code===4001?'Swap rejected in MetaMask.':netErr(e),'err')}
- finally{sCheck()}
+  const inK=$('sIn').value,outK=$('sOut').value;
+  if(inK===outK)throw new Error('Pick two different coins');
+  if(!SWAP_OK.includes(inK)||!SWAP_OK.includes(outK))throw new Error('This pair is not supported for swaps');
+  const a=$('sAmt').value.trim();if(!amtOk(a,TOK_EXPECT[inK]))throw new Error('Enter a valid amount, for example 1.25');
+  $('swap').disabled=true;window.__busy=true;say('');
+  const title='Swap '+inK+' to '+outK;
+  const rows=(extra)=>[['Swap',inK+' → '+outK],['Network','Arc Testnet (chain 5042002)'],['From',acct]].concat(extra||[]);
+  started=true;txCard({title,status:'Checking network',cls:'pend',rows:rows([['You pay',a+' '+inK]]),note:'Swaps run only on Arc Testnet. Approve a network switch in MetaMask if asked.'});
+  await ensureNetwork('Arc_Testnet');
+  txCard({title,status:'Checking',cls:'pend',rows:rows([['You pay',a+' '+inK]]),note:'Verifying tokens and your balance on Arc Testnet…'});
+  await verifyToken(inK);await verifyToken(outK);
+  try{dlog('swap:permit-support',[await permitInfo(inK),await permitInfo(outK)],true)}catch(e){}
+  const need=toUnits(a,TOK[inK].d),have=await tokBal(inK);
+  dlog('swap:preflight',{walletChain:await chainNow(),tokenIn:inK,tokenOut:outK,amount:a,balance:have.toString(),needed:need.toString()},true);
+  if(have<need)throw Object.assign(new Error('Your '+inK+' balance on Arc Testnet is '+fmtU(have,TOK[inK].d,6)+', which is less than '+a+'. Nothing was sent.'),{blocked:true});
+  txCard({title,status:'Preparing',cls:'pend',rows:rows([['You pay',a+' '+inK]]),note:'Loading Circle App Kit…'});
+  const run=async()=>{
+   await ensureNetwork('Arc_Testnet'); // re-check right before signing: the permit must be signed on the swap chain
+   const{kit,adapter}=await getKit();
+   return{kit,p:{from:{adapter,chain:'Arc_Testnet'},tokenIn:tk(inK),tokenOut:tk(outK),amountIn:a}}};
+  let ctx=await run(),est=null;
+  if(typeof ctx.kit.estimateSwap==='function'){
+   try{est=await ctx.kit.estimateSwap(ctx.p);dlog('swap:estimate',est)}
+   catch(e){dlog('swap:estimate-error',errInfo(e));throw Object.assign(new Error('Could not get a quote for '+inK+' → '+outK+': '+(e.shortMessage||e.message||e)+'. No transaction was sent.'),{blocked:true})}}
+  const estTxt=est&&est.estimatedOutput?est.estimatedOutput.amount+' '+outK:null;
+  txCard({title,status:'Waiting for MetaMask',cls:'pend',rows:rows([['You pay',a+' '+inK],['Estimated to receive',estTxt]]),note:'Confirm each prompt in MetaMask (a signature and/or approval may come first). The estimate can differ from the final amount.'});
+  let r;
+  try{r=await ctx.kit.swap(ctx.p)}
+  catch(e){
+   if(!chainMismatch(e))throw e;
+   // The permit is signed before any transaction is sent, so one safe retry on the correct network cannot duplicate a swap.
+   dlog('swap:chain-mismatch',errInfo(e));
+   txCard({title,status:'Switching network',cls:'pend',rows:rows([['You pay',a+' '+inK]]),note:'Your wallet was not on Arc Testnet when the signature was requested. Switching it back and retrying once.'});
+   ctx=await run();r=await ctx.kit.swap(ctx.p)}
+  dlog('swap:result',r);
+  const h=r&&r.txHash;
+  const fees=r&&Array.isArray(r.fees)&&r.fees.length?r.fees.map(f=>f.amount+' '+f.token+(f.type?' ('+f.type+')':'')).join(', '):null;
+  const done=(extra)=>rows([['You paid',((r&&r.amountIn)||a)+' '+inK],['You received',r&&r.amountOut?r.amountOut+' '+outK:null],['Estimated to receive',r&&r.amountOut?null:estTxt],['To',r&&r.toAddress],['Fees',fees],['Transaction',h?sh(h):null],['Explorer',h?mkLink(exTx('Arc_Testnet',h),'View on Arcscan'):null]].concat(extra||[]));
+  if(!h){txCard({title,status:'Not confirmed yet',cls:'pend',rows:done(),note:'The swap returned no transaction hash. Check your wallet activity before trying again.'});return}
+  txCard({title,status:'Pending',cls:'pend',rows:done(),note:'Submitted. Waiting for the network to confirm…'});
+  await ensureNetwork('Arc_Testnet');
+  const rc=await waitReceipt(h);dlog('swap:receipt',rc);const st=rcState(rc);
+  if(st==='ok')txCard({title,status:'Confirmed',cls:'ok',rows:done([['Block',rcBlock(rc)]]),note:r&&r.amountOut?'The swap is confirmed on Arc Testnet.':'The swap is confirmed. The final received amount was not reported, so check your balance.'});
+  else if(st==='fail')txCard({title,status:'Failed',cls:'fail',rows:done(),note:'The transaction reverted. No tokens were swapped.'});
+  else txCard({title,status:'Not confirmed yet',cls:'pend',rows:done(),note:'No receipt after 60 seconds. Check the explorer before trying again.'});
+  setTimeout(refresh,1000);setTimeout(refresh,5000);
+ }catch(e){
+  dlog('swap:error',errInfo(e));
+  let msg=e.code===4001?'You rejected the request in MetaMask. Nothing was swapped.':chainMismatch(e)?'Your wallet was on a different network than Arc Testnet when the signature was requested. Stavera switched it back, but the retry failed too. Check MetaMask is on Arc Testnet and press Swap again. Nothing was swapped.':(e.blocked||/^[A-Za-z]+ (was not found|reports )/.test(e.message||''))?e.message:walletMsg(e);
+  if(started)txCard({title:'Swap',status:e.code===4001?'Rejected':'Failed',cls:'fail',note:msg});else say(msg,'err');
+ }
+ finally{sCheck();window.__busy=false;syncNet()}
 };
+
+/* ----- Bridge ----- */
+let lastBridge=null,bridgeRun=false,hooked=false;
+function verifyRoute(kit,f,t){
+ if(typeof kit.getSupportedChains!=='function'){dlog('bridge:supported-chains','getSupportedChains is not available in this SDK build');return}
+ let list;try{list=kit.getSupportedChains()}catch(e){dlog('bridge:supported-chains-error',errInfo(e));return}
+ const nm=c=>c&&(c.chain||c.name||c.chainName);const names=(list||[]).map(nm).filter(Boolean);
+ dlog('bridge:supported-chains',{count:names.length,names,route:(list||[]).filter(c=>[f,t].includes(nm(c))).map(c=>({chain:nm(c),cctp:c.cctp}))},true);
+ if(names.length>=3){const miss=[f,t].filter(x=>!names.includes(x));if(miss.length)throw new Error('This version of Circle App Kit does not support: '+miss.join(', ')+'. The bridge was not started.')}}
+const XK='stv_xfers';
+function xfers(){try{return JSON.parse(localStorage.getItem(XK)||'[]')}catch(e){return window.__xf||[]}}
+function xsave(l){l=l.slice(0,20);try{localStorage.setItem(XK,JSON.stringify(l))}catch(e){window.__xf=l}renderRecovery()}
+function xupsert(rec){if(!rec||!rec.burn)return;const l=xfers();const i=l.findIndex(x=>x.burn&&x.burn.toLowerCase()===rec.burn.toLowerCase());if(i>=0)l[i]=Object.assign(l[i],rec);else l.unshift(Object.assign({t:Date.now()},rec));xsave(l)}
+let BR=null;
+function setStage(txt){const el=document.querySelector('#txc .fine');if(bridgeRun&&el)el.textContent=txt}
+function hookEvents(kit){if(hooked||!kit.on)return;hooked=true;
+ const find=p=>{try{const m=JSON.stringify(p,(k,v)=>typeof v==='bigint'?v.toString():v).match(/0x[0-9a-fA-F]{64}/);return m&&m[0]}catch(e){return null}};
+ try{
+  kit.on('*',p=>dlog('bridge:event',p));
+  kit.on('approve',()=>BR&&setStage('USDC approved. Submitting the burn on '+CH[BR.f].n+'. Confirm in MetaMask.'));
+  kit.on('burn',p=>{const h=find(p);if(BR&&h)xupsert({burn:h,from:BR.f,to:BR.t,amount:BR.a,wallet:acct,state:'burned'});BR&&setStage('Source burn confirmed on '+CH[BR.f].n+'. Waiting for Circle’s attestation. Do not start another bridge.')});
+  kit.on('fetchAttestation',()=>BR&&setStage('Attestation received. Preparing the destination mint on '+CH[BR.t].n+'.'));
+  kit.on('mint',()=>BR&&setStage('Destination mint submitted on '+CH[BR.t].n+'. Verifying confirmation…'));
+ }catch(e){dlog('bridge:hook-error',errInfo(e))}}
+function bNoteUpdate(){
+ const f=$('bFrom').value,t=$('bTo').value;let x='Bridging uses Circle CCTP, which moves USDC only. EURC and cirBTC cannot be bridged this way.';
+ if(f===t)x='Pick two different networks.';
+ else if(f!=='Arc_Testnet'&&t!=='Arc_Testnet')x='One side of the bridge must be Arc Testnet.';
+ else if(t==='Arc_Testnet')x+=' Into Arc: you need USDC and a little '+CH[f].gas+' on '+CH[f].n+' for gas, plus a small USDC balance on Arc to pay for the final mint step.';
+ else x+=' Out of Arc: you need USDC on Arc for the bridge and gas, plus a little '+CH[t].gas+' on '+CH[t].n+' for the final mint step.';
+ $('bNote').textContent=x}
+(function(){const r=document.createElement('div');r.id='bFlipRow';const b=document.createElement('button');b.type='button';b.id='bFlip';b.textContent='⇅ Reverse direction';
+ b.onclick=()=>{const f=$('bFrom').value;$('bFrom').value=$('bTo').value;$('bTo').value=f;bNoteUpdate()};r.appendChild(b);$('bTo').insertAdjacentElement('afterend',r);
+ $('bFrom').onchange=$('bTo').onchange=bNoteUpdate;bNoteUpdate()})();
+const stepLabel=(n,f,t)=>({approve:'Approve USDC on '+CH[f].n,burn:'Burn on '+CH[f].n+' (source)',fetchAttestation:'Circle attestation',mint:'Mint on '+CH[t].n+' (destination)'}[n]||n||'Step');
+const stepState=s=>({success:'Confirmed',error:'Failed',pending:'Pending'}[s]||String(s||'Unknown'));
+function renderBridge(r,f,t,a,verified,vnote){
+ const steps=(r&&r.steps||[]).map(s=>{const chain=(s.name==='mint')?t:f;const url=safeUrl(s.explorerUrl)||(s.txHash&&s.name!=='fetchAttestation'?exTx(chain,s.txHash):null);return{label:stepLabel(s.name,f,t),state:stepState(s.state),url}});
+ const get=n=>(r&&r.steps||[]).find(s=>s.name===n);
+ const burn=get('burn'),mint=get('mint');
+ const srcOk=!!(burn&&burn.state==='success');
+ const title='Bridge USDC: '+CH[f].n+' → '+CH[t].n;
+ const rows=[['Token','USDC'],['Amount',a+' USDC'],['From network',CH[f].n],['To network',CH[t].n],['Wallet',acct],['Source chain',srcOk?'Burn confirmed':'Not confirmed'],['Destination chain',verified?'Mint confirmed':'Not confirmed']];
+ const recover=['Check or complete this transfer',()=>{openRecovery(f,burn&&burn.txHash)}];
+ if(r&&r.state==='success'&&verified){txCard({title,status:'Completed',cls:'ok',rows,steps,note:'The destination mint is confirmed: USDC was minted on '+CH[t].n+'. Your balance can take a moment to update.'});return'ok'}
+ if(r&&r.state==='success'){txCard({title,status:'Finishing',cls:'pend',rows,steps,note:'Circle App Kit reports success, but I could not confirm the destination mint yet'+(vnote?' ('+vnote+')':'')+'. Do NOT start a new bridge. Use the button below to check this transfer.',actions:[recover]});return'pending'}
+ if(r&&r.state==='error'){const bad=(r.steps||[]).find(s=>s.state==='error');
+  const why=bad?(stepLabel(bad.name,f,t)+': '+(bad.errorMessage||bad.error||'failed')):'The bridge stopped before finishing.';
+  lastBridge={r,f,t,a};
+  txCard({title,status:srcOk?'Needs recovery':'Failed',cls:'fail',rows,steps,note:(srcOk?'Your source transaction succeeded, but the destination transfer is not yet complete. Your original transfer can be checked and retried without starting a new bridge. ':'The bridge stopped before the source burn was confirmed. Check the burn link before trying again. ')+why,actions:srcOk?[['Resume bridge',resumeBridge],recover]:[]});return'error'}
+ txCard({title,status:'In progress',cls:'pend',rows,steps,note:'The bridge is not finished yet (state: '+String(r&&r.state)+'). Check the step links.',actions:[recover]});return'pending'}
+async function finishBridge(r,f,t,a){
+ const get=n=>(r&&r.steps||[]).find(s=>s.name===n);const burn=get('burn'),mint=get('mint');
+ if(burn&&burn.txHash)xupsert({burn:burn.txHash,from:f,to:t,amount:a,wallet:acct,state:burn.state==='success'?'burned':'pending'});
+ let verified=false,vnote=null;
+ if(r&&r.state==='success'&&mint&&mint.state==='success'&&mint.txHash){
+  try{setStage('Verifying the destination mint on '+CH[t].n+'…');await ensureNetwork(t);const rc=await waitReceipt(mint.txHash,45000);dlog('bridge:mint-receipt',rc);verified=rcState(rc)==='ok';if(!verified)vnote=rc?'the mint transaction reverted':'no receipt for the mint transaction yet'}
+  catch(e){vnote=walletMsg(e)}
+ }else if(r&&r.state==='success')vnote='the mint transaction hash was not reported';
+ const out=renderBridge(r,f,t,a,verified,vnote);
+ if(out==='ok'&&burn&&burn.txHash)xupsert({burn:burn.txHash,state:'minted'});
+ return out}
+async function resumeBridge(btn){
+ if(!lastBridge)return;if(window.__busy){say('Another Stavera transaction is still in progress. Wait for it to finish.','err');return}
+ const{r,f,t,a}=lastBridge;
+ try{btn.disabled=true;window.__busy=true;btn.textContent='Resuming…';
+  const burn=(r.steps||[]).find(s=>s.name==='burn');await ensureNetwork(burn&&burn.state==='success'?t:f);
+  const{kit,adapter}=await getKit();hookEvents(kit);if(!kit.retry)throw new Error('Resume is not available in this App Kit version');
+  BR={f,t,a};bridgeRun=true;dlog('bridge:retry-start',{f,t,a});
+  const rr=await kit.retry(r,{from:adapter,to:adapter});dlog('bridge:retry-result',rr);
+  const out=await finishBridge(rr,f,t,a);if(out==='ok'){lastBridge=null;try{await ensureNetwork('Arc_Testnet')}catch(e){}setTimeout(refresh,1500)}
+ }catch(e){dlog('bridge:retry-error',errInfo(e));btn.disabled=false;btn.textContent='Resume bridge';const el=document.querySelector('#txc .fine');if(el)el.textContent=walletMsg(e)+' You can also use "Check or complete this transfer" below. Do not start a new bridge.'}
+ finally{bridgeRun=false;window.__busy=false;syncNet()}
+}
+
+/* ----- Recovery: finish a transfer whose source burn succeeded, without burning again ----- */
+const hexs=x=>String(x).replace(/^0x/,'');
+function parseMsg(m){const h=hexs(m),w=(a,b)=>h.slice(a*2,b*2);if(h.length<(148+100)*2)throw new Error('The CCTP message is too short to read.');
+ return{src:parseInt(w(4,8),16),dst:parseInt(w(8,12),16),nonce:'0x'+w(12,44),destCaller:'0x'+w(108,140),burnToken:'0x'+w(148+4+12,148+36),recipient:'0x'+w(148+36+12,148+68),amount:BigInt('0x'+w(148+68,148+100))}}
+const sameAddr=(a,b)=>String(a).toLowerCase()===String(b).toLowerCase();
+const usd6=v=>{const s=v.toString().padStart(7,'0');return (s.slice(0,-6)+'.'+s.slice(-6)).replace(/\.?0+$/,'')||'0'};
+async function irisGet(k,hash){const url=IRIS+CCTP.domain[k]+'?transactionHash='+hash;
+ for(let i=0;i<3;i++){let res;
+  try{res=await fetch(url)}catch(e){throw new Error('Could not reach Circle’s attestation service from this browser ('+(e.message||e)+'). Check your connection or any ad/privacy blocker and try again.')}
+  if(res.status===404)throw new Error('Circle has no message for this transaction yet. Either the hash is not a CCTP burn from '+CH[k].n+', the source network is wrong, or Circle has not processed it. Wait a minute and try again.');
+  if(res.status===429){await nap(3000*(i+1));continue}
+  if(!res.ok)throw new Error('Circle’s attestation service returned HTTP '+res.status+'. Try again shortly.');
+  const j=await res.json();dlog('recover:iris',j);const ms=j.messages||[];if(!ms.length)throw new Error('Circle returned no message for this transaction yet. Wait a minute and try again.');
+  return ms.find(x=>x.cctpVersion===2)||ms[0]}
+ throw new Error('Circle rate-limited the request. Wait a minute and try again.')}
+function encReceive(msg,att){const A=hexs(msg),B=hexs(att),pad=x=>x+'0'.repeat((64-(x.length%64))%64),L=x=>(x.length/2).toString(16).padStart(64,'0');
+ const p1=L(A)+pad(A),p2=L(B)+pad(B);return CCTP.SEL.receive+(0x40).toString(16).padStart(64,'0')+(0x40+p1.length/2).toString(16).padStart(64,'0')+p1+p2}
+async function nonceUsed(nonce){return BigInt(await wreq('eth_call',[{to:CCTP.MT,data:CCTP.SEL.used+hexs(nonce)},'latest']))>0n}
+async function recoverStart(srcKey,hash){
+ const T='Recover bridge transfer';
+ if(!acct){say('Connect your wallet first.','err');return}
+ if(window.__busy){say('Another Stavera transaction is still in progress. Wait for it to finish.','err');return}
+ hash=String(hash||'').trim();
+ if(!/^0x[0-9a-fA-F]{64}$/.test(hash)){say('Enter a valid transaction hash (0x followed by 64 characters).','err');return}
+ window.__busy=true;
+ try{
+  const base=[['Source network',CH[srcKey].n],['Burn transaction',sh(hash)],['Burn explorer',mkLink(exTx(srcKey,hash),'View burn transaction')]];
+  txCard({title:T,status:'Checking',cls:'pend',rows:base,note:'Asking Circle for the transfer message and attestation. Nothing is sent from your wallet in this step.'});
+  const m=await irisGet(srcKey,hash);
+  if(m.status!=='complete'||!m.attestation||m.attestation==='PENDING'){txCard({title:T,status:'Not ready',cls:'pend',rows:base,note:'Circle has not finished the attestation yet (status: '+m.status+'). Your USDC is safe. Try again in a few minutes.',actions:[['Check again',()=>recoverStart(srcKey,hash)]]});return}
+  const d=parseMsg(m.message),dst=keyByDomain(d.dst);
+  const dm=m.decodedMessage||{},db=dm.decodedMessageBody||{};
+  if(d.src!==CCTP.domain[srcKey])throw new Error('This message was burned on domain '+d.src+', not on '+CH[srcKey].n+'. Choose the correct source network.');
+  if(!dst)throw new Error('The message targets CCTP domain '+d.dst+', which Stavera does not support. Nothing was sent.');
+  if(dm.destinationDomain!=null&&Number(dm.destinationDomain)!==d.dst)throw new Error('Circle’s decoded message disagrees with the raw message (destination domain). Nothing was sent.');
+  if(db.amount!=null&&BigInt(db.amount)!==d.amount)throw new Error('Circle’s decoded amount disagrees with the raw message. Nothing was sent.');
+  if(!/^0x0{64}$/.test(d.destCaller)&&!sameAddr('0x'+d.destCaller.slice(-40),acct))throw new Error('This transfer can only be completed by another address ('+sh('0x'+d.destCaller.slice(-40))+'). Connect that wallet.');
+  const rec='0x'+d.recipient.slice(-40);
+  xupsert({burn:hash,from:srcKey,to:dst,amount:usd6(d.amount),wallet:acct,state:'burned'});
+  const rows=base.concat([['Amount burned',usd6(d.amount)+' USDC'],['Destination network',CH[dst].n],['Recipient',rec],['Attestation','Complete']]);
+  const warn=sameAddr(rec,acct)?'':' Note: the USDC will be minted to '+sh(rec)+', not to your connected wallet.';
+  dlog('recover:ready',{src:srcKey,dst,amount:d.amount.toString(),nonce:d.nonce,recipient:rec});
+  txCard({title:T,status:'Ready to complete',cls:'pend',rows,note:'The burn on '+CH[srcKey].n+' is confirmed and Circle’s attestation is ready. Completing it mints your USDC on '+CH[dst].n+' and does NOT burn anything again.'+warn,actions:[['Complete transfer on '+CH[dst].n,btn=>runMint(btn,{srcKey,dst,hash,m,d,rec,rows})]]});
+ }catch(e){dlog('recover:error',errInfo(e));txCard({title:T,status:'Could not check',cls:'fail',note:walletMsg(e)})}
+ finally{window.__busy=false;syncNet()}
+}
+async function runMint(btn,c){
+ if(window.__busy){say('Another Stavera transaction is still in progress. Wait for it to finish.','err');return}
+ const T='Recover bridge transfer',{dst,m,d,hash,rows}=c;
+ try{btn.disabled=true;window.__busy=true;
+  txCard({title:T,status:'Adding or switching network',cls:'pend',rows,note:'Approve the MetaMask request to use '+CH[dst].n+'.'});
+  await ensureNetwork(dst);
+  const code=await wreq('eth_getCode',[CCTP.MT,'latest']);
+  if(!code||code==='0x')throw new Error('The CCTP MessageTransmitter contract was not found on '+CH[dst].n+'. Nothing was sent.');
+  const ld=parseInt(await wreq('eth_call',[{to:CCTP.MT,data:CCTP.SEL.local},'latest']),16);
+  if(ld!==CCTP.domain[dst])throw new Error('The CCTP contract on '+CH[dst].n+' reports domain '+ld+', expected '+CCTP.domain[dst]+'. Nothing was sent.');
+  txCard({title:T,status:'Checking',cls:'pend',rows,note:'Checking whether this transfer was already minted…'});
+  if(await nonceUsed(d.nonce)){xupsert({burn:hash,state:'minted'});txCard({title:T,status:'Already completed',cls:'ok',rows,note:'This transfer was already minted on '+CH[dst].n+'. Nothing more to do, and nothing was sent. Check your USDC balance on '+CH[dst].n+'.'});return}
+  const data=encReceive(m.message,m.attestation);
+  try{await wreq('eth_call',[{from:acct,to:CCTP.MT,data},'latest'])}
+  catch(e){dlog('recover:simulate-error',errInfo(e));throw new Error('The destination contract would reject this mint, so nothing was sent. Reason: '+(e.shortMessage||e.message||e))}
+  txCard({title:T,status:'Waiting for MetaMask',cls:'pend',rows,note:'Confirm the mint transaction on '+CH[dst].n+' in MetaMask. You need a little '+(CH[dst].gas||'native token')+' for gas.'});
+  const h=await wreq('eth_sendTransaction',[{from:acct,to:CCTP.MT,data}]);dlog('recover:mint-submitted',{hash:h});
+  const r2=rows.concat([['Mint transaction',sh(h)],['Mint explorer',mkLink(exTx(dst,h),'View mint transaction')]]);
+  txCard({title:T,status:'Pending',cls:'pend',rows:r2,note:'Submitted. Waiting for '+CH[dst].n+' to confirm…'});
+  const rc=await waitReceipt(h,90000);dlog('recover:mint-receipt',rc);const st=rcState(rc);
+  if(st==='ok'&&(await nonceUsed(d.nonce))){xupsert({burn:hash,state:'minted'});txCard({title:T,status:'Completed',cls:'ok',rows:r2.concat([['Block',rcBlock(rc)]]),note:'The destination mint is confirmed on '+CH[dst].n+'. Your original transfer is complete.'});try{await ensureNetwork('Arc_Testnet')}catch(e){}setTimeout(refresh,1500)}
+  else if(st==='fail')txCard({title:T,status:'Failed',cls:'fail',rows:r2,note:'The mint transaction reverted. Your USDC is not lost: the burn is recorded. Copy the diagnostic report and send it to me.',actions:[['Try again',b=>runMint(b,c)]]});
+  else txCard({title:T,status:'Not confirmed yet',cls:'pend',rows:r2,note:'No confirmation after 90 seconds. Check the mint link before trying again so the mint is not submitted twice.'});
+ }catch(e){dlog('recover:mint-error',errInfo(e));txCard({title:T,status:e.code===4001?'Rejected':'Failed',cls:'fail',rows,note:walletMsg(e),actions:[['Try again',b=>runMint(b,c)]]})}
+ finally{window.__busy=false;syncNet()}
+}
+function openRecovery(f,hash){const d=$('recov');if(d)d.open=true;if(f&&$('rcSrc'))$('rcSrc').value=f;if(hash&&$('rcHash'))$('rcHash').value=hash;if(d)d.scrollIntoView({block:'center'})}
+function renderRecovery(){
+ let d=$('recov');
+ if(!d){d=document.createElement('details');d.id='recov';d.style.cssText='margin-top:12px;border:1px solid var(--line);border-radius:12px;padding:10px 14px';
+  d.innerHTML='<summary style="cursor:pointer;font-weight:600">Recover an unfinished bridge</summary><p class="fine">If your USDC was burned on the source network but never arrived, paste the source (burn) transaction hash here. Stavera finishes the destination step and never burns again.</p><div id="rcList"></div><select id="rcSrc"></select><input id="rcHash" placeholder="Burn transaction hash (0x…)" spellcheck="false" style="width:100%;margin-top:8px"><button type="button" class="btn lg" id="rcGo" style="margin-top:8px">Check transfer</button>';
+  $('bNote').after(d);Object.keys(CH).forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=CH[k].n;$('rcSrc').appendChild(o)});
+  $('rcGo').onclick=()=>recoverStart($('rcSrc').value,$('rcHash').value)}
+ const l=xfers().filter(x=>x.state!=='minted'&&x.burn),box=$('rcList');box.textContent='';
+ if(l.length){const t=document.createElement('p');t.className='fine';t.textContent='Saved on this device:';box.appendChild(t);
+  l.forEach(x=>{const b=document.createElement('button');b.type='button';b.textContent=CH[x.from].n+' → '+CH[x.to].n+', '+x.amount+' USDC ('+sh(x.burn)+')';b.style.cssText='display:block;margin:4px 0;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);cursor:pointer';b.onclick=()=>{$('rcSrc').value=x.from;$('rcHash').value=x.burn;recoverStart(x.from,x.burn)};box.appendChild(b)});
+  const sm=$('recov').querySelector('summary');sm.textContent='Recover an unfinished bridge ('+l.length+' saved)'}
+}
+renderRecovery();
+
 $('bridge').onclick=async()=>{
+ if(window.__busy){say('Another Stavera transaction is still in progress. Wait for it to finish.','err');return}
+ let started=false;
  try{
   if(!acct)throw new Error('Connect your wallet first');
   const f=$('bFrom').value,t=$('bTo').value;
   if(f===t)throw new Error('Pick two different networks');
   if(f!=='Arc_Testnet'&&t!=='Arc_Testnet')throw new Error('One side of the bridge must be Arc Testnet');
+  if(!CH[f]||!CH[t])throw new Error('Unsupported network');
   const a=$('bAmt').value.trim();if(!AMT.test(a)||Number(a)<=0)throw new Error('Enter a valid amount, for example 1.25');
-  $('bridge').disabled=true;say('Loading Circle App Kit…');
-  const{kit,adapter}=await getKit();say('Confirm each step in MetaMask. A bridge needs several approvals and can take a few minutes…');
-  const r=await kit.bridge({from:{adapter,chain:f},to:{adapter,chain:t},amount:a});
-  if(r&&r.state==='error')throw new Error('The bridge did not finish. Try again to resume it.');
-  const u=((r&&r.steps)||[]).map(x=>x.explorerUrl).filter(Boolean).pop();okMsg('Bridge complete. ',u);
- }catch(e){say(e.code===4001?'Bridge rejected in MetaMask.':netErr(e),'err')}
- finally{$('bridge').disabled=false}
+  $('bridge').disabled=true;window.__busy=true;say('');
+  const title='Bridge USDC: '+CH[f].n+' → '+CH[t].n;
+  const base=[['Token','USDC'],['Amount',a+' USDC'],['From network',CH[f].n],['To network',CH[t].n],['Wallet',acct]];
+  BR={f,t,a};started=true;
+  txCard({title,status:'Checking network',cls:'pend',rows:base,note:'Checking your wallet and the selected route…'});
+  dlog('bridge:start',{from:f,to:t,amount:a,walletChainBefore:await chainNow()});
+  /* Preflight: make MetaMask know BOTH networks before anything is burned. Destination first, then source. */
+  for(const k of [t,f]){
+   txCard({title,status:'Adding or switching network',cls:'pend',rows:base,note:'Approve the MetaMask request for '+CH[k].n+(k===t&&t!==f?' (the destination is checked first, so the final step cannot fail after your USDC is burned).':'.')});
+   await ensureNetwork(k);
+  }
+  txCard({title,status:'Preparing',cls:'pend',rows:base,note:'Loading Circle App Kit…'});
+  const{kit,adapter}=await getKit();hookEvents(kit);verifyRoute(kit,f,t);
+  txCard({title,status:'Waiting for MetaMask',cls:'pend',rows:base,note:'Confirm each prompt in MetaMask. A bridge needs several approvals and can take a few minutes. Keep this tab open.'});
+  bridgeRun=true;
+  const r=await kit.bridge({from:{adapter,chain:f},to:{adapter,chain:t},amount:a});dlog('bridge:result',r);
+  const out=await finishBridge(r,f,t,a);
+  if(out==='ok'){lastBridge=null;try{await ensureNetwork('Arc_Testnet')}catch(e){}setTimeout(refresh,1500)}
+ }catch(e){
+  dlog('bridge:error',errInfo(e));
+  const msg=walletMsg(e)+((e.code===4001)?'':' If a burn already happened, use "Recover an unfinished bridge" below instead of starting a new bridge.');
+  if(started)txCard({title:'Bridge',status:e.code===4001?'Rejected':'Failed',cls:'fail',note:msg,actions:[['Check or complete a transfer',()=>openRecovery()]]});else say(msg,'err');
+ }
+ finally{bridgeRun=false;$('bridge').disabled=false;window.__busy=false;syncNet()}
 };
 sCheck();
 </script>
